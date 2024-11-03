@@ -215,26 +215,49 @@ function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const seriesId = params.get('series');
     const sharedGameId = params.get('game');
     
-    if (sharedGameId && auth.currentUser) {
-      const loadSharedGame = async () => {
-        const gameDoc = await getDoc(doc(db, 'games', sharedGameId));
-        if (gameDoc.exists()) {
-          const sharedGame = gameDoc.data() as Game;
+    if (seriesId && auth.currentUser) {
+      const loadSeriesGame = async () => {
+        const seriesDoc = await getDoc(doc(db, 'series', seriesId));
+        if (seriesDoc.exists()) {
+          const series = seriesDoc.data() as GameSeries;
           setCurrentGame({
-            id: uuidv4(),
-            word: sharedGame.word,
+            id: series.currentGameId,
+            word: series.currentWord || getRandomWord(),
             guesses: [],
             status: 'playing',
             createdAt: Date.now(),
-            sharedBy: sharedGame.userId
+            seriesId: seriesId
           });
+          setCurrentSeries(series);
         }
       };
-      loadSharedGame();
+      loadSeriesGame();
     }
   }, [auth.currentUser]);
+
+  useEffect(() => {
+    if (selectedSeriesId && auth.currentUser) {
+      const loadSeriesGame = async () => {
+        const seriesDoc = await getDoc(doc(db, 'series', selectedSeriesId));
+        if (seriesDoc.exists()) {
+          const series = seriesDoc.data() as GameSeries;
+          setCurrentGame({
+            id: series.currentGameId,
+            word: series.currentWord,
+            guesses: [],
+            status: 'playing',
+            createdAt: Date.now(),
+            seriesId: selectedSeriesId
+          });
+          setCurrentSeries(series);
+        }
+      };
+      loadSeriesGame();
+    }
+  }, [selectedSeriesId, auth.currentUser]);
 
   const handleKeyPress = (key: string) => {
     console.log('handleKeyPress called:', { key, status: currentGame.status, currentGuess });
@@ -251,6 +274,7 @@ function App() {
       setCurrentGuess(prev => prev + key);
     }
   };
+  
   const handleSubmitGuess = async () => {
     if (currentGuess.length !== 5) {
       toast.error('Word must be 5 letters!');
@@ -296,7 +320,7 @@ function App() {
           const userRef = doc(db, 'users', auth.currentUser.uid);
           const userDoc = await getDoc(userRef);
           const userData = userDoc.data() as User;
-          
+          const newWins = newStatus === 'won' ? (userData.wins || 0) + 1 : (userData.wins || 0);
           const newScore = userData.score + scoreIncrease;
           const newGamesPlayed = userData.gamesPlayed + 1;
           const newWins = newStatus === 'won' ? (userData.wins || 0) + 1 : (userData.wins || 0);
@@ -339,13 +363,13 @@ function App() {
           const gameRef = doc(db, 'games', updatedGame.id);
           const gameData = {
             ...updatedGame,
-            userId: auth.currentUser.uid,
+            
             scoreEarned: scoreIncrease,
             completedAt: Date.now()
           };
           await setDoc(gameRef, gameData);
   
-          // Handle series updates if part of a series
+          // Handle series updates
           if (currentGame.seriesId) {
             const seriesRef = doc(db, 'series', currentGame.seriesId);
             const seriesDoc = await getDoc(seriesRef);
@@ -354,57 +378,87 @@ function App() {
               const series = seriesDoc.data() as GameSeries;
               const isPlayer1 = series.player1 === auth.currentUser.uid;
               
-              const seriesUpdate: Partial<GameSeries> = {
-                games: [...series.games, gameData],
-                lastPlayedAt: Date.now()
+              // Generate next game
+              const nextGameId = uuidv4();
+              const nextWord = getUniqueRandomWord();
+              const nextGame: Game = {
+                id: nextGameId,
+                word: nextWord,
+                guesses: [],
+                status: 'playing',
+                createdAt: Date.now(),
+                seriesId: currentGame.seriesId
               };
-  
-              // Update scores
-              if (newStatus === 'won') {
-                seriesUpdate[isPlayer1 ? 'player1Score' : 'player2Score'] = 
-                  series[isPlayer1 ? 'player1Score' : 'player2Score'] + 1;
-              }
-  
-              // Generate next game if needed
-              if (series.currentGameId === currentGame.id) {
-                const nextWord = getUniqueRandomWord();
-                const nextGame: Game = {
-                  id: uuidv4(),
-                  word: nextWord,
-                  guesses: [],
-                  status: 'playing',
-                  createdAt: Date.now(),
-                  seriesId: currentGame.seriesId
-                };
-  
-                seriesUpdate.currentGameId = nextGame.id;
-                
-                // Save next game
-                await setDoc(doc(db, 'games', nextGame.id), nextGame);
-              }
-  
-              await updateDoc(seriesRef, seriesUpdate);
-            }
-          }
-  
-          // Handle shared game response
-          if (currentGame.sharedBy && !currentGame.seriesId) {
-            const seriesId = `${auth.currentUser.uid}_${currentGame.sharedBy}`.split('_').sort().join('_');
-            const seriesRef = doc(db, 'series', seriesId);
-            const seriesDoc = await getDoc(seriesRef);
-  
-            if (seriesDoc.exists()) {
-              // Add game to existing series
-              const series = seriesDoc.data() as GameSeries;
-              const isPlayer1 = series.player1 === auth.currentUser.uid;
-  
+          
+              // Update series with new game and scores
               await updateDoc(seriesRef, {
+                currentGameId: nextGameId,
+                currentWord: nextWord,
                 games: [...series.games, gameData],
                 [isPlayer1 ? 'player1Score' : 'player2Score']: 
                   series[isPlayer1 ? 'player1Score' : 'player2Score'] + 
                   (newStatus === 'won' ? 1 : 0),
                 lastPlayedAt: Date.now()
               });
+          
+              // Save next game
+              await setDoc(doc(db, 'games', nextGameId), nextGame);
+              
+              // Set next game after small delay
+              setTimeout(() => {
+                setCurrentGame(nextGame);
+                setCurrentSeries(series);
+                setShowShare(false);
+              }, 2000);
+            }
+          } else if (currentGame.sharedBy) {
+            // Create new series from shared game
+            const seriesId = `${auth.currentUser.uid}_${currentGame.sharedBy}`.split('_').sort().join('_');
+            const seriesRef = doc(db, 'series', seriesId);
+            const seriesDoc = await getDoc(seriesRef);
+  
+            if (!seriesDoc.exists()) {
+              // Create new series
+              const nextGameId = uuidv4();
+              const nextWord = getUniqueRandomWord();
+              
+              const newSeries: GameSeries = {
+                id: seriesId,
+                players: [auth.currentUser.uid, currentGame.sharedBy].sort(),
+                playerNames: {
+                  [auth.currentUser.uid]: userData.username,
+                  [currentGame.sharedBy]: currentGame.sharedBy.split('@')[0]
+                },
+                currentGameId: nextGameId,
+                currentWord: nextWord,
+                player1: auth.currentUser.uid,
+                player2: currentGame.sharedBy,
+                player1Score: newStatus === 'won' ? 1 : 0,
+                player2Score: 0,
+                games: [gameData],
+                lastPlayedAt: Date.now(),
+                status: 'active'
+              };
+  
+              // Create next game
+              const nextGame: Game = {
+                id: nextGameId,
+                word: nextWord,
+                guesses: [],
+                status: 'playing',
+                createdAt: Date.now(),
+                seriesId: seriesId
+              };
+  
+              await setDoc(seriesRef, newSeries);
+              await setDoc(doc(db, 'games', nextGameId), nextGame);
+  
+              // Set next game after small delay
+              setTimeout(() => {
+                setCurrentGame(nextGame);
+                setCurrentSeries(newSeries);
+                setShowShare(false);
+              }, 2000);
             }
           }
   

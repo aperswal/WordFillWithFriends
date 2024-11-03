@@ -34,6 +34,7 @@ export interface Game {
   sharedBy?: string;
   sharedWith?: string[];
   playerScore?: number;
+  completedAt?: number;
 }
 
 export interface GameSeries {
@@ -48,6 +49,7 @@ export interface GameSeries {
   games: Game[];
   lastPlayedAt: number;
   status: 'active' | 'completed';
+  currentWord?: string;  // Add this to track the current word
 }
 
 export interface GlobalRanking {

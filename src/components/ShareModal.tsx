@@ -89,35 +89,38 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
   
     const seriesId = `${auth.currentUser.uid}_${recipientEmail}`.split('_').sort().join('_');
     const seriesRef = doc(db, 'series', seriesId);
-    const seriesDoc = await getDoc(seriesRef);
-  
-    const updatedGame = {
-      ...game,
-      userId: auth.currentUser.uid,
+    
+    const newGameId = uuidv4();
+    const newGame = {
+      id: newGameId,
+      word: game.word,
+      guesses: [],
+      status: 'playing',
+      createdAt: Date.now(),
       seriesId,
-      playerScore: calculateGameScore(game)
+      sharedBy: auth.currentUser.uid
     };
   
-    if (seriesDoc.exists()) {
-      await updateExistingSeries(seriesRef, seriesDoc, updatedGame);
-    } else {
-      await createNewSeries(seriesRef, seriesId, recipientEmail, updatedGame);
-    }
+    const newSeries: GameSeries = {
+      id: seriesId,
+      players: [auth.currentUser.uid, recipientEmail].sort(),
+      playerNames: {
+        [auth.currentUser.uid]: auth.currentUser.displayName || 'Player 1',
+        [recipientEmail]: recipientEmail.split('@')[0]
+      },
+      currentGameId: newGameId,
+      currentWord: game.word,
+      player1: auth.currentUser.uid,
+      player2: recipientEmail,
+      player1Score: game.status === 'won' ? 1 : 0,
+      player2Score: 0,
+      games: [game],
+      lastPlayedAt: Date.now(),
+      status: 'active'
+    };
   
-    // Update game with series info
-    await setDoc(doc(db, 'games', game.id), {
-      ...updatedGame,
-      sharedWith: [...(game.sharedWith || []), recipientEmail]
-    });
-  
-    // Record share event
-    await addDoc(collection(db, 'shares'), {
-      gameId: game.id,
-      seriesId,
-      sharedBy: auth.currentUser.uid,
-      sharedWith: recipientEmail,
-      sharedAt: Date.now()
-    });
+    await setDoc(seriesRef, newSeries);
+    await setDoc(doc(db, 'games', newGameId), newGame);
   
     return seriesId;
   };

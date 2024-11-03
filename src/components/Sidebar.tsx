@@ -27,15 +27,15 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-2">
         {series.map((s) => {
           const isPlayer1 = s.player1 === currentUserId;
-          const score = isPlayer1 
-            ? `${s.player1Score} - ${s.player2Score}`
-            : `${s.player2Score} - ${s.player1Score}`;
-            
+          const myScore = isPlayer1 ? s.player1Score : s.player2Score;
+          const theirScore = isPlayer1 ? s.player2Score : s.player1Score;
+          const opponent = isPlayer1 ? s.player2 : s.player1;
+          
           return (
             <button
               key={s.id}
               onClick={() => onSelectSeries(s.id)}
-              className={`w-full p-3 rounded-lg mb-2 text-left transition-colors ${
+              className={`w-full p-3 rounded-lg mb-2 text-left ${
                 selectedSeriesId === s.id
                   ? 'bg-indigo-50 border-indigo-200'
                   : 'hover:bg-gray-50'
@@ -43,11 +43,13 @@ const Sidebar: React.FC<SidebarProps> = ({
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="font-medium truncate">
-                  {isPlayer1 ? s.player2 : s.player1}
+                  {s.playerNames[opponent] || opponent}
                 </span>
                 <div className="flex items-center gap-1 text-yellow-500">
                   <Trophy className="w-4 h-4" />
-                  <span className="text-sm font-semibold">{score}</span>
+                  <span className="text-sm font-semibold">
+                    {myScore} - {theirScore}
+                  </span>
                 </div>
               </div>
               <div className="text-sm text-gray-500">
