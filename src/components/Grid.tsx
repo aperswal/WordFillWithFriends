@@ -7,10 +7,26 @@ interface GridProps {
 }
 
 const Grid: React.FC<GridProps> = ({ word, guesses, currentGuess }) => {
-  const empties = Array(6 - guesses.length - 1).fill('');
-  const currentGuessArray = currentGuess.split('').concat(Array(5 - currentGuess.length).fill(''));
-  const allRows = [...guesses.map(g => g.split('')), currentGuessArray, ...empties.map(() => Array(5).fill(''))];
+  console.log('Grid rendering:', { word, guesses, currentGuess });
+  
+  // Calculate remaining empty rows needed
+  const remainingRows = Math.max(0, 6 - (guesses.length + 1));
+  
+  // Create arrays for each row type
+  const guessRows = guesses.map(g => g.split(''));
+  const currentGuessArray = currentGuess ? currentGuess.split('').concat(Array(5 - currentGuess.length).fill('')) : Array(5).fill('');
+  const emptyRows = Array(remainingRows).fill(Array(5).fill(''));
+  
+  // Combine all rows
+  const allRows = [...guessRows];
+  if (guesses.length < 6) {
+    allRows.push(currentGuessArray);
+    allRows.push(...emptyRows);
+  }
 
+  console.log('Grid computed rows:', allRows);
+  
+  // Rest of the component remains the same...
   const getLetterClass = (letter: string, rowIndex: number, colIndex: number) => {
     const baseClass = 'w-14 h-14 border-2 flex items-center justify-center text-2xl font-bold rounded transition-all duration-300';
     
