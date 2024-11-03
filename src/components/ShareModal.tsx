@@ -3,6 +3,7 @@ import { X, Copy, Mail, Share } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
+import { Game, GameSeries } from '../types';
 
 interface ShareModalProps {
   game: Game;
@@ -30,57 +31,149 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
   const shareUrl = `${window.location.origin}?game=${game.id}`;
 
   const handleShare = async (method: 'copy' | 'email' | 'native') => {
+    // Generate share text
     const score = game.guesses.length;
     const challengeText = `I solved Word Fill w/ Friends in ${score}/6 tries!\n\nCan you beat my score?\n`;
-    const text = `${challengeText}\n${getGamePattern()}\n\nPlay this word: ${shareUrl}`;
+    const pattern = getGamePattern();
     
+    // Handle email sharing
     if (method === 'email') {
       if (!auth.currentUser) {
-        // Instead of immediately showing auth, open email client
-        const emailSubject = "Challenge: Can you beat my Word Fill w/ Friends score?";
-        const emailBody = `Hey!\n\n${text}\n\nGood luck!\n\nSign up to track and compare scores: ${window.location.origin}`;
-        window.location.href = `mailto:${email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-        setEmail('');
+        handleAnonymousEmailShare(challengeText, pattern);
         return;
       }
       
       try {
-        // Save share data if user is signed in
-        await setDoc(doc(db, 'games', game.id), {
-          ...game,
-          userId: auth.currentUser.uid,
-          sharedWith: [...(game.sharedWith || []), email]
-        });
-  
-        await addDoc(collection(db, 'shares'), {
-          gameId: game.id,
-          sharedBy: auth.currentUser.uid,
-          sharedWith: email,
-          sharedAt: Date.now()
-        });
+        const seriesId = await handleSeriesCreation(email);
+        const shareUrl = `${window.location.origin}?series=${seriesId}&game=${game.id}`;
         
+        // Send email with series link
         const emailSubject = "Challenge: Can you beat my Word Fill w/ Friends score?";
-        const emailBody = `Hey!\n\n${text}\n\nGood luck!`;
-        window.location.href = `mailto:${email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
+        const emailBody = `Hey!\n\n${challengeText}\n${pattern}\n\nClick here to play this word and start our series: ${shareUrl}\n\nGood luck!`;
         
+        window.location.href = `mailto:${email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
         setEmail('');
         toast.success('Game shared via email!');
       } catch (err) {
         console.error('Share error:', err);
         toast.error('Failed to share game');
       }
-    } else if (method === 'native' && navigator.share) {
+      return;
+    }
+  
+    // Handle native sharing and clipboard
+    const text = `${challengeText}\n${pattern}\n\nPlay at: ${window.location.origin}`;
+    
+    if (method === 'native' && navigator.share) {
       try {
         await navigator.share({ text });
         toast.success('Shared successfully!');
-      } catch (err) {
-        await navigator.clipboard.writeText(text);
-        toast.success('Copied to clipboard!');
+      } catch {
+        await copyToClipboard(text);
       }
     } else {
-      await navigator.clipboard.writeText(text);
-      toast.success('Copied to clipboard!');
+      await copyToClipboard(text);
     }
+  };
+  
+  // Helper functions
+  const handleAnonymousEmailShare = (challengeText: string, pattern: string) => {
+    const emailSubject = "Challenge: Can you beat my Word Fill w/ Friends score?";
+    const emailBody = `Hey!\n\n${challengeText}\n${pattern}\n\nSign up to track and compare scores: ${window.location.origin}\n\nGood luck!`;
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
+    setEmail('');
+  };
+  
+  const handleSeriesCreation = async (recipientEmail: string): Promise<string> => {
+    if (!auth.currentUser) throw new Error('No authenticated user');
+  
+    const seriesId = `${auth.currentUser.uid}_${recipientEmail}`.split('_').sort().join('_');
+    const seriesRef = doc(db, 'series', seriesId);
+    const seriesDoc = await getDoc(seriesRef);
+  
+    const updatedGame = {
+      ...game,
+      userId: auth.currentUser.uid,
+      seriesId,
+      playerScore: calculateGameScore(game)
+    };
+  
+    if (seriesDoc.exists()) {
+      await updateExistingSeries(seriesRef, seriesDoc, updatedGame);
+    } else {
+      await createNewSeries(seriesRef, seriesId, recipientEmail, updatedGame);
+    }
+  
+    // Update game with series info
+    await setDoc(doc(db, 'games', game.id), {
+      ...updatedGame,
+      sharedWith: [...(game.sharedWith || []), recipientEmail]
+    });
+  
+    // Record share event
+    await addDoc(collection(db, 'shares'), {
+      gameId: game.id,
+      seriesId,
+      sharedBy: auth.currentUser.uid,
+      sharedWith: recipientEmail,
+      sharedAt: Date.now()
+    });
+  
+    return seriesId;
+  };
+  
+  const updateExistingSeries = async (
+    seriesRef: DocumentReference,
+    seriesDoc: DocumentSnapshot,
+    updatedGame: Game
+  ) => {
+    const existingSeries = seriesDoc.data() as GameSeries;
+    const isPlayer1 = existingSeries.player1 === auth.currentUser!.uid;
+    
+    await updateDoc(seriesRef, {
+      games: [...existingSeries.games, updatedGame],
+      currentGameId: game.id,
+      lastPlayedAt: Date.now(),
+      [isPlayer1 ? 'player1Score' : 'player2Score']: 
+        existingSeries[isPlayer1 ? 'player1Score' : 'player2Score'] + 
+        (game.status === 'won' ? 1 : 0)
+    });
+  };
+  
+  const createNewSeries = async (
+    seriesRef: DocumentReference,
+    seriesId: string,
+    recipientEmail: string,
+    updatedGame: Game
+  ) => {
+    const newSeries: GameSeries = {
+      id: seriesId,
+      players: [auth.currentUser!.uid, recipientEmail].sort(),
+      playerNames: {
+        [auth.currentUser!.uid]: auth.currentUser!.displayName || 'Player 1',
+        [recipientEmail]: recipientEmail.split('@')[0]
+      },
+      currentGameId: game.id,
+      player1: auth.currentUser!.uid,
+      player2: recipientEmail,
+      player1Score: game.status === 'won' ? 1 : 0,
+      player2Score: 0,
+      games: [updatedGame],
+      lastPlayedAt: Date.now(),
+      status: 'active'
+    };
+    
+    await setDoc(seriesRef, newSeries);
+  };
+  
+  const calculateGameScore = (game: Game): number => {
+    if (game.status !== 'won') return 10;
+    return Math.max(7 - game.guesses.length, 1) * 100;
+  };
+  
+  const copyToClipboard = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    toast.success('Copied to clipboard!');
   };
 
   return (

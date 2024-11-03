@@ -48,6 +48,25 @@ import type {
 // Constants
 import { TIER_THRESHOLDS, TierType } from './constants/tiers';
 
+const getUniqueRandomWord = () => {
+  const completedWords = JSON.parse(localStorage.getItem('completedWords') || '[]');
+  let newWord = getRandomWord();
+  let attempts = 0;
+  
+  // Try to find a new word up to 10 times
+  while (completedWords.includes(newWord) && attempts < 10) {
+    newWord = getRandomWord();
+    attempts++;
+  }
+  
+  // If all words are used, clear history
+  if (attempts >= 10) {
+    localStorage.setItem('completedWords', '[]');
+  }
+  
+  return newWord;
+};
+
 function App() {
   const [currentGuess, setCurrentGuess] = useState('');
   const [games, setGames] = useState<Game[]>([]);
@@ -57,6 +76,7 @@ function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [currentSeries, setCurrentSeries] = useState<GameSeries | null>(null);
   const [currentGame, setCurrentGame] = useState<Game>({
     
     id: uuidv4(),
@@ -317,62 +337,77 @@ function App() {
   
           // Save game data
           const gameRef = doc(db, 'games', updatedGame.id);
-          await setDoc(gameRef, {
+          const gameData = {
             ...updatedGame,
             userId: auth.currentUser.uid,
             scoreEarned: scoreIncrease,
             completedAt: Date.now()
-          });
+          };
+          await setDoc(gameRef, gameData);
   
-          // Update series if game was shared
-          if (currentGame.sharedBy) {
-            const seriesId = `${auth.currentUser.uid}_${currentGame.sharedBy}`.split('_').sort().join('_');
-            const seriesRef = doc(db, 'series', seriesId);
+          // Handle series updates if part of a series
+          if (currentGame.seriesId) {
+            const seriesRef = doc(db, 'series', currentGame.seriesId);
             const seriesDoc = await getDoc(seriesRef);
             
-            const seriesGame = {
-              id: currentGame.id,
-              word: currentGame.word,
-              guesses: newGuesses,
-              winner: newStatus === 'won' ? auth.currentUser.uid : null,
-              score: newStatus === 'won' ? 6 - newGuesses.length : 0,
-              completedAt: Date.now()
-            };
-  
             if (seriesDoc.exists()) {
               const series = seriesDoc.data() as GameSeries;
               const isPlayer1 = series.player1 === auth.currentUser.uid;
               
-              await updateDoc(seriesRef, {
-                games: [...series.games, seriesGame],
-                player1Score: isPlayer1 
-                  ? series.player1Score + (newStatus === 'won' ? seriesGame.score : 0)
-                  : series.player1Score,
-                player2Score: !isPlayer1 
-                  ? series.player2Score + (newStatus === 'won' ? seriesGame.score : 0)
-                  : series.player2Score,
+              const seriesUpdate: Partial<GameSeries> = {
+                games: [...series.games, gameData],
                 lastPlayedAt: Date.now()
-              });
-            } else {
-              // Create new series
-              const opponent = await getDoc(doc(db, 'users', currentGame.sharedBy));
-              const opponentData = opponent.data() as User;
-              
-              await setDoc(seriesRef, {
-                id: seriesId,
-                player1: currentGame.sharedBy,
-                player2: auth.currentUser.uid,
-                playerNames: {
-                  [currentGame.sharedBy]: opponentData.username || 'Unknown',
-                  [auth.currentUser.uid]: userData.username || 'Unknown'
-                },
-                player1Score: 0,
-                player2Score: newStatus === 'won' ? seriesGame.score : 0,
-                games: [seriesGame],
+              };
+  
+              // Update scores
+              if (newStatus === 'won') {
+                seriesUpdate[isPlayer1 ? 'player1Score' : 'player2Score'] = 
+                  series[isPlayer1 ? 'player1Score' : 'player2Score'] + 1;
+              }
+  
+              // Generate next game if needed
+              if (series.currentGameId === currentGame.id) {
+                const nextWord = getUniqueRandomWord();
+                const nextGame: Game = {
+                  id: uuidv4(),
+                  word: nextWord,
+                  guesses: [],
+                  status: 'playing',
+                  createdAt: Date.now(),
+                  seriesId: currentGame.seriesId
+                };
+  
+                seriesUpdate.currentGameId = nextGame.id;
+                
+                // Save next game
+                await setDoc(doc(db, 'games', nextGame.id), nextGame);
+              }
+  
+              await updateDoc(seriesRef, seriesUpdate);
+            }
+          }
+  
+          // Handle shared game response
+          if (currentGame.sharedBy && !currentGame.seriesId) {
+            const seriesId = `${auth.currentUser.uid}_${currentGame.sharedBy}`.split('_').sort().join('_');
+            const seriesRef = doc(db, 'series', seriesId);
+            const seriesDoc = await getDoc(seriesRef);
+  
+            if (seriesDoc.exists()) {
+              // Add game to existing series
+              const series = seriesDoc.data() as GameSeries;
+              const isPlayer1 = series.player1 === auth.currentUser.uid;
+  
+              await updateDoc(seriesRef, {
+                games: [...series.games, gameData],
+                [isPlayer1 ? 'player1Score' : 'player2Score']: 
+                  series[isPlayer1 ? 'player1Score' : 'player2Score'] + 
+                  (newStatus === 'won' ? 1 : 0),
                 lastPlayedAt: Date.now()
               });
             }
           }
+  
         } catch (err) {
           console.error('Error updating data:', err);
           toast.error('Failed to update game data');
@@ -383,9 +418,15 @@ function App() {
 
 
   const startNewGame = () => {
+    if (currentGame.status === 'won') {
+      const completedWords = JSON.parse(localStorage.getItem('completedWords') || '[]');
+      completedWords.push(currentGame.word);
+      localStorage.setItem('completedWords', JSON.stringify(completedWords));
+    }
+  
     setCurrentGame({
       id: uuidv4(),
-      word: getRandomWord(),
+      word: getUniqueRandomWord(),
       guesses: [],
       status: 'playing',
       createdAt: Date.now()

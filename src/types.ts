@@ -14,18 +14,6 @@ export interface User {
   lastGameAt?: number;
 }
 
-
-export interface Game {
-  id: string;
-  word: string;
-  guesses: string[];
-  status: 'playing' | 'won' | 'lost';
-  createdAt: number;
-  userId?: string;
-  sharedBy?: string;
-  sharedWith?: string[];
-}
-
 export interface SeriesGame {
   id: string;
   word: string;
@@ -35,16 +23,31 @@ export interface SeriesGame {
   completedAt: number;
 }
 
+export interface Game {
+  id: string;
+  word: string;
+  guesses: string[];
+  status: 'playing' | 'won' | 'lost';
+  createdAt: number;
+  seriesId?: string;
+  userId?: string;
+  sharedBy?: string;
+  sharedWith?: string[];
+  playerScore?: number;
+}
+
 export interface GameSeries {
   id: string;
   players: string[];
   playerNames: Record<string, string>;
+  currentGameId: string;
   player1: string;
   player2: string;
   player1Score: number;
   player2Score: number;
-  games: SeriesGame[];
+  games: Game[];
   lastPlayedAt: number;
+  status: 'active' | 'completed';
 }
 
 export interface GlobalRanking {
