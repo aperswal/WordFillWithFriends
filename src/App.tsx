@@ -14,6 +14,8 @@ import AuthModal from './components/AuthModal';
 import Sidebar from './components/Sidebar';
 import RankingSidebar from './components/RankingSidebar';
 import ProfileModal from './components/ProfileModal';
+import MobileMenu from './components/MobileMenu';
+import {Menu} from 'lucide-react';
 
 // Utils and Helpers
 import { getRandomWord, isValidWord } from './utils/words';
@@ -53,8 +55,10 @@ function App() {
   const [topRankings, setTopRankings] = useState<GlobalRanking[]>([]);
   const [nearbyRankings, setNearbyRankings] = useState<GlobalRanking[]>([]);
   const [showProfile, setShowProfile] = useState(false);
-const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [currentGame, setCurrentGame] = useState<Game>({
+    
     id: uuidv4(),
     word: getRandomWord(),
     guesses: [],
@@ -227,113 +231,169 @@ const [currentUser, setCurrentUser] = useState<User | null>(null);
       setCurrentGuess(prev => prev + key);
     }
   };
-
-const handleSubmitGuess = async () => {
-  if (currentGuess.length !== 5) {
-    toast.error('Word must be 5 letters!');
-    return;
-  }
-
-  const upperGuess = currentGuess.toUpperCase();
+  const handleSubmitGuess = async () => {
+    if (currentGuess.length !== 5) {
+      toast.error('Word must be 5 letters!');
+      return;
+    }
   
-  if (!isValidWord(upperGuess)) {
-    toast.error('Not a valid word!');
-    return;
-  }
-
-  const newGuesses = [...currentGame.guesses, upperGuess];
-  let newStatus = currentGame.status;
-  let scoreIncrease = 0;
-
-  if (upperGuess === currentGame.word) {
-    newStatus = 'won';
-    // Score based on number of guesses (fewer guesses = more points)
-    scoreIncrease = Math.max(7 - newGuesses.length, 1) * 100;
-    toast.success('Congratulations!');
-  } else if (newGuesses.length >= 6) {
-    newStatus = 'lost';
-    // Small consolation points for trying
-    scoreIncrease = 10;
-    toast.error(`Game Over! The word was ${currentGame.word}`);
-  }
-
-  const updatedGame = {
-    ...currentGame,
-    guesses: newGuesses,
-    status: newStatus
+    const upperGuess = currentGuess.toUpperCase();
+    
+    if (!isValidWord(upperGuess)) {
+      toast.error('Not a valid word!');
+      return;
+    }
+  
+    const newGuesses = [...currentGame.guesses, upperGuess];
+    let newStatus = currentGame.status;
+    let scoreIncrease = 0;
+  
+    if (upperGuess === currentGame.word) {
+      newStatus = 'won';
+      scoreIncrease = Math.max(7 - newGuesses.length, 1) * 100;
+      toast.success('Congratulations!');
+    } else if (newGuesses.length >= 6) {
+      newStatus = 'lost';
+      scoreIncrease = 10;
+      toast.error(`Game Over! The word was ${currentGame.word}`);
+    }
+  
+    const updatedGame = {
+      ...currentGame,
+      guesses: newGuesses,
+      status: newStatus
+    };
+  
+    setCurrentGame(updatedGame);
+    setCurrentGuess('');
+  
+    if (newStatus === 'won' || newStatus === 'lost') {
+      setShowShare(true);
+  
+      if (auth.currentUser) {
+        try {
+          // Update user stats
+          const userRef = doc(db, 'users', auth.currentUser.uid);
+          const userDoc = await getDoc(userRef);
+          const userData = userDoc.data() as User;
+          
+          const newScore = userData.score + scoreIncrease;
+          const newGamesPlayed = userData.gamesPlayed + 1;
+          const newWins = newStatus === 'won' ? (userData.wins || 0) + 1 : (userData.wins || 0);
+          const newWinRate = (newWins / newGamesPlayed) * 100;
+          
+          const newTier = Object.entries(TIER_THRESHOLDS)
+            .sort(([,a], [,b]) => b - a)
+            .find(([,threshold]) => newScore >= threshold)?.[0] || 'Bronze';
+  
+          await updateDoc(userRef, {
+            score: newScore,
+            gamesPlayed: newGamesPlayed,
+            wins: newWins,
+            winRate: newWinRate,
+            tier: newTier,
+            lastGameAt: Date.now()
+          });
+  
+          // Update global rankings
+          const rankingRef = doc(db, 'rankings', auth.currentUser.uid);
+          await setDoc(rankingRef, {
+            userId: auth.currentUser.uid,
+            username: userData.username,
+            score: newScore,
+            tier: newTier,
+            iconId: userData.iconId,
+            iconColor: userData.iconColor,
+            backgroundId: userData.backgroundId,
+            lastUpdated: Date.now()
+          }, { merge: true });
+  
+          if (newTier !== userData.tier) {
+            toast.success(`Promoted to ${newTier} Tier! 🎉`, {
+              duration: 5000,
+              icon: '🏆'
+            });
+          }
+  
+          // Save game data
+          const gameRef = doc(db, 'games', updatedGame.id);
+          await setDoc(gameRef, {
+            ...updatedGame,
+            userId: auth.currentUser.uid,
+            scoreEarned: scoreIncrease,
+            completedAt: Date.now()
+          });
+  
+          // Update series if game was shared
+          if (currentGame.sharedBy) {
+            const seriesId = `${auth.currentUser.uid}_${currentGame.sharedBy}`.split('_').sort().join('_');
+            const seriesRef = doc(db, 'series', seriesId);
+            const seriesDoc = await getDoc(seriesRef);
+            
+            const seriesGame = {
+              id: currentGame.id,
+              word: currentGame.word,
+              guesses: newGuesses,
+              winner: newStatus === 'won' ? auth.currentUser.uid : null,
+              score: newStatus === 'won' ? 6 - newGuesses.length : 0,
+              completedAt: Date.now()
+            };
+  
+            if (seriesDoc.exists()) {
+              const series = seriesDoc.data() as GameSeries;
+              const isPlayer1 = series.player1 === auth.currentUser.uid;
+              
+              await updateDoc(seriesRef, {
+                games: [...series.games, seriesGame],
+                player1Score: isPlayer1 
+                  ? series.player1Score + (newStatus === 'won' ? seriesGame.score : 0)
+                  : series.player1Score,
+                player2Score: !isPlayer1 
+                  ? series.player2Score + (newStatus === 'won' ? seriesGame.score : 0)
+                  : series.player2Score,
+                lastPlayedAt: Date.now()
+              });
+            } else {
+              // Create new series
+              const opponent = await getDoc(doc(db, 'users', currentGame.sharedBy));
+              const opponentData = opponent.data() as User;
+              
+              await setDoc(seriesRef, {
+                id: seriesId,
+                player1: currentGame.sharedBy,
+                player2: auth.currentUser.uid,
+                playerNames: {
+                  [currentGame.sharedBy]: opponentData.username || 'Unknown',
+                  [auth.currentUser.uid]: userData.username || 'Unknown'
+                },
+                player1Score: 0,
+                player2Score: newStatus === 'won' ? seriesGame.score : 0,
+                games: [seriesGame],
+                lastPlayedAt: Date.now()
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Error updating data:', err);
+          toast.error('Failed to update game data');
+        }
+      }
+    }
   };
 
-  setCurrentGame(updatedGame);
-  setCurrentGuess('');
 
-  if (auth.currentUser && (newStatus === 'won' || newStatus === 'lost')) {
-    try {
-      const userRef = doc(db, 'users', auth.currentUser.uid);
-      const userDoc = await getDoc(userRef);
-      const userData = userDoc.data() as User;
-      
-      const newScore = userData.score + scoreIncrease;
-      const newGamesPlayed = userData.gamesPlayed + 1;
-      const newWins = newStatus === 'won' ? (userData.wins || 0) + 1 : (userData.wins || 0);
-      const newWinRate = (newWins / newGamesPlayed) * 100;
-      
-      // Calculate new tier based on score
-      const newTier = Object.entries(TIER_THRESHOLDS)
-        .sort(([,a], [,b]) => b - a)
-        .find(([,threshold]) => newScore >= threshold)?.[0] || 'Bronze';
-
-      // Update user data
-      await updateDoc(userRef, {
-        score: newScore,
-        gamesPlayed: newGamesPlayed,
-        wins: newWins,
-        winRate: newWinRate,
-        tier: newTier,
-        lastGameAt: Date.now()
-      });
-
-      // Update rankings collection
-      const rankingRef = doc(db, 'rankings', auth.currentUser.uid);
-      await setDoc(rankingRef, {
-        userId: auth.currentUser.uid,
-        username: userData.username,
-        score: newScore,
-        tier: newTier,
-        iconId: userData.iconId,
-        iconColor: userData.iconColor,
-        backgroundId: userData.backgroundId,
-        lastUpdated: Date.now()
-      }, { merge: true });
-
-      // Show tier promotion message if tier changed
-      if (newTier !== userData.tier) {
-        toast.success(`Promoted to ${newTier} Tier! 🎉`, {
-          duration: 5000,
-          icon: '🏆'
-        });
-      }
-
-      // Add game to history
-      const gameRef = doc(db, 'games', updatedGame.id);
-      await setDoc(gameRef, {
-        ...updatedGame,
-        userId: auth.currentUser.uid,
-        scoreEarned: scoreIncrease,
-        completedAt: Date.now()
-      });
-
-    } catch (err) {
-      console.error('Error updating user data:', err);
-      toast.error('Failed to update score');
-    }
-
-    setShowShare(true);
-  }
-};
-
-const startNewGame = () => {
-  window.location.reload();
-};
+  const startNewGame = () => {
+    setCurrentGame({
+      id: uuidv4(),
+      word: getRandomWord(),
+      guesses: [],
+      status: 'playing',
+      createdAt: Date.now()
+    });
+    setCurrentGuess('');
+    setUsedLetters({});
+    setShowShare(false);
+  };
 
 useEffect(() => {
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -354,96 +414,123 @@ useEffect(() => {
   return () => window.removeEventListener('keydown', handleKeyDown);
 }, [handleKeyPress, showProfile, showAuth, showShare]); // Add modal states to dependencies
 
-  return (
-    <div className="flex h-screen bg-gray-50">
-      {auth.currentUser && (
-        <Sidebar
-          series={series}
-          currentUserId={auth.currentUser.uid}
-          onSelectSeries={setSelectedSeriesId}
-          selectedSeriesId={selectedSeriesId}
-        />
-      )}
-      
-      <div className="flex-1 flex flex-col">
-        <header className="bg-white border-b border-gray-200 p-4">
-          <div className="max-w-4xl mx-auto flex justify-between items-center">
-            <h1 className="text-2xl font-bold">Word Fill w/ Friends</h1>
-            <div className="flex gap-2">
-              {!auth.currentUser ? (
-                <button
-                  onClick={() => setShowAuth(true)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700"
-                >
-                  Sign In
-                </button>
-              ) : (
-                <button
-                  onClick={() => setShowProfile(true)}
-                  className="px-4 py-2 bg-gray-100 rounded-lg font-semibold hover:bg-gray-200"
-                >
-                  Profile
-                </button>
-              )}
+return (
+  <div className="flex flex-col md:flex-row min-h-screen bg-gray-50">
+    {auth.currentUser && (
+      <>
+        <div className="hidden md:block">
+          <Sidebar
+            series={series}
+            currentUserId={auth.currentUser.uid}
+            onSelectSeries={setSelectedSeriesId}
+            selectedSeriesId={selectedSeriesId}
+          />
+        </div>
+        
+        {showMobileMenu && (
+          <MobileMenu
+            isOpen={showMobileMenu}
+            onClose={() => setShowMobileMenu(false)}
+            series={series}
+            currentUserId={auth.currentUser.uid}
+            onSelectSeries={setSelectedSeriesId}
+            selectedSeriesId={selectedSeriesId}
+          />
+        )}
+      </>
+    )}
+    
+    <div className="flex-1 flex flex-col">
+      <header className="bg-white border-b border-gray-200 p-4">
+        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-4">
+            {auth.currentUser && (
               <button
-                onClick={startNewGame}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg font-semibold hover:bg-gray-200"
+                onClick={() => setShowMobileMenu(true)}
+                className="md:hidden p-2 text-gray-500 hover:text-gray-700 rounded-lg"
               >
-                <PlusCircle className="w-5 h-5" />
-                New Game
+                <Menu className="w-6 h-6" />
               </button>
-            </div>
+            )}
+            <h1 className="text-2xl font-bold">Word Fill w/ Friends</h1>
           </div>
-        </header>
-  
-        <main className="flex-1 overflow-auto">
-          <div className="max-w-4xl mx-auto p-4">
-            <Grid
-              word={currentGame.word}
-              guesses={currentGame.guesses}
-              currentGuess={currentGuess}
-            />
-            <Keyboard
-              onKeyPress={handleKeyPress}
-              usedLetters={usedLetters}
-            />
+          <div className="flex gap-2">
+            {!auth.currentUser ? (
+              <button
+                onClick={() => setShowAuth(true)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700"
+              >
+                Sign In
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowProfile(true)}
+                className="px-4 py-2 bg-gray-100 rounded-lg font-semibold hover:bg-gray-200"
+              >
+                Profile
+              </button>
+            )}
+            <button
+              onClick={startNewGame}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg font-semibold hover:bg-gray-200"
+            >
+              <PlusCircle className="w-5 h-5" />
+              <span className="hidden sm:inline">New Game</span>
+            </button>
           </div>
-        </main>
-      </div>
-  
-      {auth.currentUser && (
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-auto">
+        <div className="max-w-4xl mx-auto p-4">
+          <Grid
+            word={currentGame.word}
+            guesses={currentGame.guesses}
+            currentGuess={currentGuess}
+          />
+          <Keyboard
+            onKeyPress={handleKeyPress}
+            usedLetters={usedLetters}
+          />
+        </div>
+      </main>
+    </div>
+
+    {auth.currentUser && (
+      <div className="hidden md:block">
         <RankingSidebar
           currentUser={currentUser}
           topRankings={topRankings}
           nearbyRankings={nearbyRankings}
         />
-      )}
-  
-      <Toaster position="top-center" />
-      
-      {showShare && (
-        <ShareModal
-          game={currentGame}
-          onClose={() => setShowShare(false)}
-          onShowAuth={() => {
-            setShowShare(false);
-            setShowAuth(true);
-          }}
-        />
-      )}
-      
-      {showAuth && (
-        <AuthModal onClose={() => setShowAuth(false)} />
-      )}
-  
-      {showProfile && auth.currentUser && (
-        <ProfileModal 
-          onClose={() => setShowProfile(false)}
-          currentUser={currentUser}
-        />
-      )}
-    </div>
-  );
+      </div>
+    )}
+
+    <Toaster position="top-center" />
+    
+    {showShare && (
+      <ShareModal
+        game={currentGame}
+        onClose={() => setShowShare(false)}
+        onShowAuth={() => {
+          setShowShare(false);
+          setShowAuth(true);
+        }}
+      />
+    )}
+    
+    {showAuth && (
+      <AuthModal onClose={() => setShowAuth(false)} />
+    )}
+
+    {showProfile && auth.currentUser && (
+      <ProfileModal 
+        onClose={() => setShowProfile(false)}
+        currentUser={currentUser}
+      />
+    )}
+  </div>
+);
 }
 
 export default App;

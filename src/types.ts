@@ -26,14 +26,25 @@ export interface Game {
   sharedWith?: string[];
 }
 
+export interface SeriesGame {
+  id: string;
+  word: string;
+  player1Score: number;
+  player2Score: number;
+  winner: string | null;
+  completedAt: number;
+}
+
 export interface GameSeries {
   id: string;
+  players: string[];
+  playerNames: Record<string, string>;
   player1: string;
   player2: string;
   player1Score: number;
   player2Score: number;
-  games: string[];
-  players: string[];
+  games: SeriesGame[];
+  lastPlayedAt: number;
 }
 
 export interface GlobalRanking {

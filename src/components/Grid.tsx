@@ -7,28 +7,22 @@ interface GridProps {
 }
 
 const Grid: React.FC<GridProps> = ({ word, guesses, currentGuess }) => {
-  console.log('Grid rendering:', { word, guesses, currentGuess });
-  
-  // Calculate remaining empty rows needed
   const remainingRows = Math.max(0, 6 - (guesses.length + 1));
   
-  // Create arrays for each row type
   const guessRows = guesses.map(g => g.split(''));
-  const currentGuessArray = currentGuess ? currentGuess.split('').concat(Array(5 - currentGuess.length).fill('')) : Array(5).fill('');
+  const currentGuessArray = currentGuess 
+    ? currentGuess.split('').concat(Array(5 - currentGuess.length).fill('')) 
+    : Array(5).fill('');
   const emptyRows = Array(remainingRows).fill(Array(5).fill(''));
   
-  // Combine all rows
   const allRows = [...guessRows];
   if (guesses.length < 6) {
     allRows.push(currentGuessArray);
     allRows.push(...emptyRows);
   }
 
-  console.log('Grid computed rows:', allRows);
-  
-  // Rest of the component remains the same...
   const getLetterClass = (letter: string, rowIndex: number, colIndex: number) => {
-    const baseClass = 'w-14 h-14 border-2 flex items-center justify-center text-2xl font-bold rounded transition-all duration-300';
+    const baseClass = 'w-[14vw] h-[14vw] md:w-14 md:h-14 border-2 flex items-center justify-center text-lg md:text-2xl font-bold rounded transition-all duration-300';
     
     if (rowIndex >= guesses.length) {
       return letter 
@@ -48,9 +42,9 @@ const Grid: React.FC<GridProps> = ({ word, guesses, currentGuess }) => {
   };
 
   return (
-    <div className="grid gap-1 mb-4">
+    <div className="grid gap-1 sm:gap-2 mb-4 max-w-sm mx-auto">
       {allRows.map((row, rowIndex) => (
-        <div key={rowIndex} className="flex gap-1 justify-center">
+        <div key={rowIndex} className="flex gap-1 sm:gap-2 justify-center">
           {row.map((letter, colIndex) => (
             <div
               key={colIndex}
