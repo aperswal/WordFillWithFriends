@@ -320,7 +320,6 @@ function App() {
           const userRef = doc(db, 'users', auth.currentUser.uid);
           const userDoc = await getDoc(userRef);
           const userData = userDoc.data() as User;
-          const newWins = newStatus === 'won' ? (userData.wins || 0) + 1 : (userData.wins || 0);
           const newScore = userData.score + scoreIncrease;
           const newGamesPlayed = userData.gamesPlayed + 1;
           const newWins = newStatus === 'won' ? (userData.wins || 0) + 1 : (userData.wins || 0);
