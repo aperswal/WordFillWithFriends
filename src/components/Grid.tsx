@@ -30,27 +30,58 @@ const Grid: React.FC<GridProps> = ({ word, guesses, currentGuess }) => {
         : `${baseClass} border-gray-300 scale-95`;
     }
 
+    const guess = guesses[rowIndex];
+    
+    // First pass: mark exact matches
+    const exactMatches = new Set();
+    for (let i = 0; i < word.length; i++) {
+      if (guess[i].toLowerCase() === word[i]) {
+        exactMatches.add(i);
+      }
+    }
+
+    // If this is an exact match, return green
     if (letter === word[colIndex]) {
       return `${baseClass} bg-green-500 border-green-500 text-white`;
     }
-    
-    if (word.includes(letter)) {
-      return `${baseClass} bg-yellow-500 border-yellow-500 text-white`;
+
+    // Count remaining available letters after exact matches
+    const letterCount = {};
+    for (let i = 0; i < word.length; i++) {
+      if (!exactMatches.has(i)) {
+        letterCount[word[i]] = (letterCount[word[i]] || 0) + 1;
+      }
+    }
+
+    // Check if this letter can be yellow
+    if (word.includes(letter) && !exactMatches.has(colIndex)) {
+      // Count how many of this letter we've used before this position
+      let usedCount = 0;
+      for (let i = 0; i < colIndex; i++) {
+        if (guess[i].toLowerCase() === letter && !exactMatches.has(i) && word.includes(letter)) {
+          usedCount++;
+        }
+      }
+
+      // If we haven't used up all instances of this letter, show yellow
+      if (usedCount < (letterCount[letter] || 0)) {
+        return `${baseClass} bg-yellow-500 border-yellow-500 text-white`;
+      }
     }
     
     return `${baseClass} bg-gray-600 border-gray-600 text-white`;
-  };
+};
 
   return (
-    <div className="grid gap-1 sm:gap-2 mb-4 max-w-sm mx-auto">
+    <div className="grid grid-rows-6 gap-1 mx-auto w-fit">
       {allRows.map((row, rowIndex) => (
-        <div key={rowIndex} className="flex gap-1 sm:gap-2 justify-center">
+        <div key={rowIndex} className="grid grid-cols-5 gap-1">
           {row.map((letter, colIndex) => (
             <div
               key={colIndex}
-              className={getLetterClass(letter, rowIndex, colIndex)}
+              className={getLetterClass(letter.toLowerCase(), rowIndex, colIndex)}
             >
-              {letter}
+              {letter.toUpperCase()}  {/* Display uppercase */}
             </div>
           ))}
         </div>
