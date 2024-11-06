@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { X, Copy, Mail, Share } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
-import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { Game, GameSeries } from '../types';
+import { v4 as uuidv4 } from 'uuid';
 
 interface ShareModalProps {
   game: Game;
@@ -15,17 +16,48 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
   const [email, setEmail] = useState('');
   
   const getGamePattern = () => {
-    return game.guesses
-      .map(guess => {
-        return guess.split('')
-          .map((letter, i) => {
-            if (letter === game.word[i]) return '🟩';
-            if (game.word.includes(letter)) return '🟨';
-            return '⬜';
-          })
-          .join('');
-      })
-      .join('\n');
+    const getSquareColor = (guess: string, index: number) => {
+      // First pass: mark exact matches
+      const exactMatches = new Set();
+      for (let i = 0; i < game.word.length; i++) {
+        if (guess[i].toUpperCase() === game.word[i].toUpperCase()) {
+          exactMatches.add(i);
+        }
+      }
+
+      // If this is an exact match, return green
+      if (guess[index].toUpperCase() === game.word[index].toUpperCase()) {
+        return '🟩';
+      }
+
+      // Check if this letter can be yellow
+      if (game.word.toUpperCase().includes(guess[index].toUpperCase()) && !exactMatches.has(index)) {
+        // Count how many of this letter we've used before this position
+        let usedCount = 0;
+        for (let i = 0; i < index; i++) {
+          if (guess[i].toUpperCase() === guess[index].toUpperCase() && 
+              !exactMatches.has(i) && 
+              game.word.toUpperCase().includes(guess[index].toUpperCase())) {
+            usedCount++;
+          }
+        }
+
+        // Count how many of this letter are in the word
+        const letterCount = game.word.toUpperCase().split('')
+          .filter(l => l === guess[index].toUpperCase()).length;
+
+        // If we haven't used up all instances of this letter, show yellow
+        if (usedCount < letterCount) {
+          return '🟨';
+        }
+      }
+
+      return '⬛';
+    };
+
+    return game.guesses.map(guess => 
+      guess.split('').map((_, i) => getSquareColor(guess, i)).join('')
+    ).join('\n');
   };
 
   const shareUrl = `${window.location.origin}?game=${game.id}`;
@@ -76,7 +108,6 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
     }
   };
   
-  // Helper functions
   const handleAnonymousEmailShare = (challengeText: string, pattern: string) => {
     const emailSubject = "Challenge: Can you beat my Word Fill w/ Friends score?";
     const emailBody = `Hey!\n\n${challengeText}\n${pattern}\n\nSign up to track and compare scores: ${window.location.origin}\n\nGood luck!`;
@@ -125,55 +156,6 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
     return seriesId;
   };
   
-  const updateExistingSeries = async (
-    seriesRef: DocumentReference,
-    seriesDoc: DocumentSnapshot,
-    updatedGame: Game
-  ) => {
-    const existingSeries = seriesDoc.data() as GameSeries;
-    const isPlayer1 = existingSeries.player1 === auth.currentUser!.uid;
-    
-    await updateDoc(seriesRef, {
-      games: [...existingSeries.games, updatedGame],
-      currentGameId: game.id,
-      lastPlayedAt: Date.now(),
-      [isPlayer1 ? 'player1Score' : 'player2Score']: 
-        existingSeries[isPlayer1 ? 'player1Score' : 'player2Score'] + 
-        (game.status === 'won' ? 1 : 0)
-    });
-  };
-  
-  const createNewSeries = async (
-    seriesRef: DocumentReference,
-    seriesId: string,
-    recipientEmail: string,
-    updatedGame: Game
-  ) => {
-    const newSeries: GameSeries = {
-      id: seriesId,
-      players: [auth.currentUser!.uid, recipientEmail].sort(),
-      playerNames: {
-        [auth.currentUser!.uid]: auth.currentUser!.displayName || 'Player 1',
-        [recipientEmail]: recipientEmail.split('@')[0]
-      },
-      currentGameId: game.id,
-      player1: auth.currentUser!.uid,
-      player2: recipientEmail,
-      player1Score: game.status === 'won' ? 1 : 0,
-      player2Score: 0,
-      games: [updatedGame],
-      lastPlayedAt: Date.now(),
-      status: 'active'
-    };
-    
-    await setDoc(seriesRef, newSeries);
-  };
-  
-  const calculateGameScore = (game: Game): number => {
-    if (game.status !== 'won') return 10;
-    return Math.max(7 - game.guesses.length, 1) * 100;
-  };
-  
   const copyToClipboard = async (text: string) => {
     await navigator.clipboard.writeText(text);
     toast.success('Copied to clipboard!');
@@ -181,23 +163,23 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-  <div className="bg-white rounded-lg w-full max-w-md p-4 sm:p-6 relative">
-    <button
-      onClick={onClose}
-      className="absolute top-2 right-2 sm:top-4 sm:right-4 text-gray-500 hover:text-gray-700"
-    >
-      <X className="w-5 h-5" />
-    </button>
+      <div className="bg-white rounded-lg w-full max-w-md p-4 sm:p-6 relative">
+        <button
+          onClick={onClose}
+          className="absolute top-2 right-2 sm:top-4 sm:right-4 text-gray-500 hover:text-gray-700"
+        >
+          <X className="w-5 h-5" />
+        </button>
 
-    <h2 className="text-xl font-bold mb-4">Share Your Result!</h2>
-    
-    <div className="mb-4 sm:mb-6">
-      <pre className="font-mono text-xs sm:text-sm bg-gray-100 p-2 sm:p-4 rounded-lg overflow-x-auto">
-        {getGamePattern()}
-      </pre>
-    </div>
+        <h2 className="text-xl font-bold mb-4">Share Your Result!</h2>
+        
+        <div className="mb-4 sm:mb-6">
+          <pre className="font-mono text-xs sm:text-sm bg-gray-100 p-2 sm:p-4 rounded-lg overflow-x-auto">
+            {getGamePattern()}
+          </pre>
+        </div>
 
-    <div className="space-y-3 sm:space-y-4">
+        <div className="space-y-3 sm:space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Share via Email

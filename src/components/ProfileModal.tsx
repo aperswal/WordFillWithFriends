@@ -9,6 +9,7 @@ import { auth, db } from '../lib/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import type { User as UserType } from '../types';
+import { signOut } from 'firebase/auth';
 
 interface ProfileModalProps {
   onClose: () => void;
@@ -65,6 +66,17 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, currentUser }) => 
   const [selectedIcon, setSelectedIcon] = useState(currentUser?.iconId || 1);
   const [selectedIconColor, setSelectedIconColor] = useState(currentUser?.iconColor || COLOR_OPTIONS[0].solid);
   const [selectedBackground, setSelectedBackground] = useState(currentUser?.backgroundId || 1);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      toast.success('Logged out successfully');
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      onClose();
+    }
+  };
 
   const handleSave = async () => {
     if (!username.trim()) {
@@ -158,27 +170,12 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, currentUser }) => 
               ))}
             </div>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Background Theme
-            </label>
-            <div className="grid grid-cols-6 gap-2 max-h-48 overflow-y-auto">
-              {BACKGROUND_OPTIONS.map(bg => (
-                <button
-                  key={bg}
-                  onClick={() => setSelectedBackground(bg)}
-                  className={`w-full aspect-square rounded-lg border-2 hover:opacity-90 transition-opacity`}
-                  style={{ 
-                    backgroundImage: `url(/backgrounds/bg${bg}.jpg)`,
-                    backgroundSize: 'cover',
-                    borderColor: selectedBackground === bg ? selectedIconColor : 'transparent'
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-
+          <button
+              onClick={handleLogout}
+              className="w-full mt-6 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700"
+            >
+              Log Out
+          </button>
           <button
             onClick={handleSave}
             className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700"

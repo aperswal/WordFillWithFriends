@@ -1,5 +1,5 @@
 // React and Core Dependencies
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
 // UI Components and Libraries
@@ -19,9 +19,11 @@ import {Menu} from 'lucide-react';
 
 // Utils and Helpers
 import { getRandomWord, isValidWord } from './utils/words';
+import { calculateGameScore, calculateRankChange } from './utils/scoring';
 
 // Firebase
 import { auth, db } from './lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { 
   collection, 
   query, 
@@ -42,7 +44,7 @@ import type {
   Game, 
   GameSeries, 
   GlobalRanking, 
-  User 
+  User
 } from './types';
 
 // Constants
@@ -68,6 +70,7 @@ const getUniqueRandomWord = () => {
 };
 
 function App() {
+  const gameAreaRef = useRef<HTMLDivElement>(null);
   const [currentGuess, setCurrentGuess] = useState('');
   const [games, setGames] = useState<Game[]>([]);
   const [series, setSeries] = useState<GameSeries[]>([]);
@@ -77,6 +80,7 @@ function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [currentSeries, setCurrentSeries] = useState<GameSeries | null>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
   const [currentGame, setCurrentGame] = useState<Game>({
     
     id: uuidv4(),
@@ -119,7 +123,14 @@ function App() {
   
     return () => unsubUser();
   }, [auth.currentUser]);
-  
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthInitialized(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     if (!auth.currentUser) return;
 
@@ -196,20 +207,21 @@ function App() {
     
     currentGame.guesses.forEach(guess => {
       guess.split('').forEach((letter, index) => {
-        if (letter === currentGame.word[index]) {
+        // If letter is not in the word at all, mark it as absent
+        if (!currentGame.word.toLowerCase().includes(letter.toLowerCase())) {
+          newUsedLetters[letter] = 'absent';
+        }
+        // If it's in the correct position, mark it as correct
+        else if (letter.toLowerCase() === currentGame.word[index].toLowerCase()) {
           newUsedLetters[letter] = 'correct';
-        } else if (currentGame.word.includes(letter)) {
-          if (newUsedLetters[letter] !== 'correct') {
-            newUsedLetters[letter] = 'present';
-          }
-        } else {
-          if (!newUsedLetters[letter]) {
-            newUsedLetters[letter] = 'absent';
-          }
+        }
+        // If it's in the word but not marked yet, mark it as present
+        else if (!newUsedLetters[letter]) {
+          newUsedLetters[letter] = 'present';
         }
       });
     });
-
+  
     setUsedLetters(newUsedLetters);
   }, [currentGame.guesses, currentGame.word]);
 
@@ -274,6 +286,21 @@ function App() {
       setCurrentGuess(prev => prev + key);
     }
   };
+  const countReusedAbsentLetters = (guess: string, usedLetters: Record<string, string>) => {
+    return guess.split('').filter(letter => usedLetters[letter] === 'absent').length;
+  };
+  
+  const countReusedWrongPositions = (guess: string, previousGuesses: string[]) => {
+    let count = 0;
+    previousGuesses.forEach(prevGuess => {
+      for (let i = 0; i < guess.length; i++) {
+        if (guess[i] === prevGuess[i] && guess[i] !== currentGame.word[i]) {
+          count++;
+        }
+      }
+    });
+    return count;
+  };
   
   const handleSubmitGuess = async () => {
     if (currentGuess.length !== 5) {
@@ -284,28 +311,42 @@ function App() {
     const upperGuess = currentGuess.toUpperCase();
     
     if (!isValidWord(upperGuess)) {
+      setCurrentGame(prev => ({
+        ...prev,
+        stats: {
+          ...prev.stats,
+          invalidWordAttempts: (prev.stats?.invalidWordAttempts || 0) + 1
+        }
+      }));
       toast.error('Not a valid word!');
       return;
     }
   
     const newGuesses = [...currentGame.guesses, upperGuess];
     let newStatus = currentGame.status;
-    let scoreIncrease = 0;
   
-    if (upperGuess === currentGame.word) {
+    // Calculate game statistics
+    const gameStats = {
+      invalidWordAttempts: currentGame.stats?.invalidWordAttempts || 0,
+      reusedAbsentLetters: countReusedAbsentLetters(upperGuess, usedLetters),
+      reusedWrongPositions: countReusedWrongPositions(upperGuess, currentGame.guesses),
+      timeToComplete: Date.now() - currentGame.createdAt,
+      turnsUsed: newGuesses.length
+    };
+  
+    if (upperGuess === currentGame.word.toUpperCase()) {
       newStatus = 'won';
-      scoreIncrease = Math.max(7 - newGuesses.length, 1) * 100;
       toast.success('Congratulations!');
     } else if (newGuesses.length >= 6) {
       newStatus = 'lost';
-      scoreIncrease = 10;
       toast.error(`Game Over! The word was ${currentGame.word}`);
     }
   
     const updatedGame = {
       ...currentGame,
       guesses: newGuesses,
-      status: newStatus
+      status: newStatus,
+      stats: gameStats
     };
   
     setCurrentGame(updatedGame);
@@ -316,19 +357,40 @@ function App() {
   
       if (auth.currentUser) {
         try {
-          // Update user stats
+          // Calculate score based on performance
+          const gameScore = calculateGameScore(gameStats);
+          
+          // Get user data
           const userRef = doc(db, 'users', auth.currentUser.uid);
           const userDoc = await getDoc(userRef);
           const userData = userDoc.data() as User;
-          const newScore = userData.score + scoreIncrease;
+  
+          // Calculate rank change based on performance and current tier
+          const scoreChange = calculateRankChange(
+            userData.score,
+            gameScore,
+            userData.tier || 'Bronze'
+          );
+  
+          // Update user statistics
+          const newScore = Math.max(0, userData.score + scoreChange); // Ensure total score doesn't go below 0
           const newGamesPlayed = userData.gamesPlayed + 1;
           const newWins = newStatus === 'won' ? (userData.wins || 0) + 1 : (userData.wins || 0);
           const newWinRate = (newWins / newGamesPlayed) * 100;
-          
+  
+          // Determine new tier
           const newTier = Object.entries(TIER_THRESHOLDS)
             .sort(([,a], [,b]) => b - a)
             .find(([,threshold]) => newScore >= threshold)?.[0] || 'Bronze';
   
+          // Show score change toast
+          if (scoreChange > 0) {
+            toast.success(`+${scoreChange} points!`, { icon: '📈' });
+          } else if (scoreChange < 0) {
+            toast.error(`${scoreChange} points`, { icon: '📉' });
+          }
+  
+          // Update user document
           await updateDoc(userRef, {
             score: newScore,
             gamesPlayed: newGamesPlayed,
@@ -351,20 +413,30 @@ function App() {
             lastUpdated: Date.now()
           }, { merge: true });
   
+          // Show tier change notification
           if (newTier !== userData.tier) {
-            toast.success(`Promoted to ${newTier} Tier! 🎉`, {
-              duration: 5000,
-              icon: '🏆'
-            });
+            if (TIER_THRESHOLDS[newTier as keyof typeof TIER_THRESHOLDS] > 
+                TIER_THRESHOLDS[userData.tier as keyof typeof TIER_THRESHOLDS]) {
+              toast.success(`Promoted to ${newTier} Tier! 🎉`, {
+                duration: 5000,
+                icon: '🏆'
+              });
+            } else {
+              toast.error(`Demoted to ${newTier} Tier`, {
+                duration: 5000,
+                icon: '⬇️'
+              });
+            }
           }
   
           // Save game data
           const gameRef = doc(db, 'games', updatedGame.id);
           const gameData = {
             ...updatedGame,
-            
-            scoreEarned: scoreIncrease,
-            completedAt: Date.now()
+            userId: auth.currentUser.uid,
+            scoreEarned: scoreChange,
+            completedAt: Date.now(),
+            stats: gameStats
           };
           await setDoc(gameRef, gameData);
   
@@ -386,7 +458,8 @@ function App() {
                 guesses: [],
                 status: 'playing',
                 createdAt: Date.now(),
-                seriesId: currentGame.seriesId
+                seriesId: currentGame.seriesId,
+                stats: { invalidWordAttempts: 0 }
               };
           
               // Update series with new game and scores
@@ -403,7 +476,6 @@ function App() {
               // Save next game
               await setDoc(doc(db, 'games', nextGameId), nextGame);
               
-              // Set next game after small delay
               setTimeout(() => {
                 setCurrentGame(nextGame);
                 setCurrentSeries(series);
@@ -446,13 +518,13 @@ function App() {
                 guesses: [],
                 status: 'playing',
                 createdAt: Date.now(),
-                seriesId: seriesId
+                seriesId: seriesId,
+                stats: { invalidWordAttempts: 0 }
               };
   
               await setDoc(seriesRef, newSeries);
               await setDoc(doc(db, 'games', nextGameId), nextGame);
   
-              // Set next game after small delay
               setTimeout(() => {
                 setCurrentGame(nextGame);
                 setCurrentSeries(newSeries);
@@ -468,7 +540,6 @@ function App() {
       }
     }
   };
-
 
   const startNewGame = () => {
     if (currentGame.status === 'won') {
@@ -487,6 +558,11 @@ function App() {
     setCurrentGuess('');
     setUsedLetters({});
     setShowShare(false);
+    
+    // Add focus shift
+    if (gameAreaRef.current) {
+      gameAreaRef.current.focus();
+    }
   };
 
 useEffect(() => {
@@ -507,6 +583,14 @@ useEffect(() => {
   window.addEventListener('keydown', handleKeyDown);
   return () => window.removeEventListener('keydown', handleKeyDown);
 }, [handleKeyPress, showProfile, showAuth, showShare]); // Add modal states to dependencies
+
+if (!authInitialized) {
+  return (
+    <div className="h-screen w-screen flex items-center justify-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
+    </div>
+  );
+}
 
 return (
   <div className="flex flex-col md:flex-row min-h-screen bg-gray-50">
@@ -576,18 +660,22 @@ return (
       </header>
 
       <main className="flex-1 overflow-auto">
-        <div className="max-w-4xl mx-auto p-4">
-          <Grid
-            word={currentGame.word}
-            guesses={currentGame.guesses}
-            currentGuess={currentGuess}
-          />
-          <Keyboard
-            onKeyPress={handleKeyPress}
-            usedLetters={usedLetters}
-          />
-        </div>
-      </main>
+  <div 
+    ref={gameAreaRef}
+    tabIndex={-1}
+    className="max-w-4xl mx-auto p-4 outline-none"
+  >
+    <Grid
+      word={currentGame.word}
+      guesses={currentGame.guesses}
+      currentGuess={currentGuess}
+    />
+    <Keyboard
+      onKeyPress={handleKeyPress}
+      usedLetters={usedLetters}
+    />
+  </div>
+</main>
     </div>
 
     {auth.currentUser && (

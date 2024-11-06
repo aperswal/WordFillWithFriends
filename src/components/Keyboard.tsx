@@ -19,7 +19,7 @@ const Keyboard: React.FC<KeyboardProps> = ({ onKeyPress, usedLetters }) => {
     if (key === 'ENTER' || key === '⌫') {
       return `${baseClass} px-2 sm:px-4 bg-gray-300 hover:bg-gray-400 text-gray-800 flex-grow max-w-[65px]`;
     }
-
+  
     const widthClass = 'w-[8vw] sm:w-[40px]';
     
     switch (status) {
@@ -28,7 +28,7 @@ const Keyboard: React.FC<KeyboardProps> = ({ onKeyPress, usedLetters }) => {
       case 'present':
         return `${baseClass} ${widthClass} bg-yellow-500 text-white`;
       case 'absent':
-        return `${baseClass} ${widthClass} bg-gray-600 text-white`;
+        return `${baseClass} ${widthClass} bg-gray-600 text-white`; // Changed back to gray-600 for absent letters
       default:
         return `${baseClass} ${widthClass} bg-gray-200 hover:bg-gray-300 text-gray-800`;
     }

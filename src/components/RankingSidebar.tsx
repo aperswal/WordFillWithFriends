@@ -66,9 +66,9 @@ const RankingSidebar: React.FC<RankingSidebarProps> = ({ currentUser, topRanking
   };
 
   const getTierRank = (player: GlobalRanking, rankings: GlobalRanking[]) => {
-    return rankings
-      .filter(r => r.tier === player.tier)
-      .findIndex(r => r.userId === player.userId) + 1;
+    const tierPlayers = rankings.filter(r => r.tier === player.tier);
+    const playerIndex = tierPlayers.findIndex(r => r.userId === player.userId);
+    return playerIndex >= 0 ? playerIndex + 1 : tierPlayers.length + 1;
   };
 
   const getNextTier = (tier: string) => {
@@ -108,65 +108,66 @@ const RankingSidebar: React.FC<RankingSidebarProps> = ({ currentUser, topRanking
       </div>
     );
   };
-
-  return (
-    <div className="w-80 bg-white border-l border-gray-200 h-screen overflow-y-auto">
-      <div className="p-4 border-b border-gray-200">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <Trophy className="w-5 h-5" />
-          Global Rankings
-        </h2>
-      </div>
-
-      <div className="p-4">
-        <h3 className="font-semibold mb-2 flex items-center gap-1">
-          <Crown className="w-4 h-4 text-yellow-500" />
-          Top Players
-        </h3>
-        
-        {topRankings.map(player => (
-          <div key={player.userId} className="flex items-center gap-2 p-2 rounded-lg mb-2">
-            {renderPlayerIcon(player)}
-            <div className="flex-1">
-              <div className="font-medium">{player.username}</div>
-              <div className="text-sm text-gray-500 flex items-center gap-1">
-                <span className={getTierColor(player.tier)}>{player.tier}</span>
-                <span>•</span>
-                <span>{player.score} pts</span>
-                <span>•</span>
-                <span>#{getTierRank(player, topRankings)} in {player.tier}</span>
+  
+    return (
+      <div className="w-80 bg-white border-l border-gray-200 h-screen overflow-y-auto">
+        <div className="p-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Trophy className="w-5 h-5" />
+            Global Rankings
+          </h2>
+        </div>
+  
+        <div className="p-4">
+          <h3 className="font-semibold mb-2 flex items-center gap-1">
+            <Crown className="w-4 h-4 text-yellow-500" />
+            Top Players
+          </h3>
+          
+          {topRankings.map(player => (
+            <div key={player.userId} className="flex items-center gap-2 p-2 rounded-lg mb-2">
+              {renderPlayerIcon(player)}
+              <div className="flex-1">
+                <div className="font-medium">{player.username}</div>
+                <div className="text-sm text-gray-500 flex items-center gap-1">
+                  <span className={getTierColor(player.tier)}>{player.tier}</span>
+                  <span>•</span>
+                  <span>{player.score.toLocaleString()} pts</span>
+                  <span>•</span>
+                  <span>#{player.rank}</span>
+                </div>
               </div>
             </div>
-            <div className="text-lg font-bold">#{player.rank}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="p-4 border-t border-gray-200">
-        <h3 className="font-semibold mb-2">Your Ranking</h3>
-        
-        {nearbyRankings.map(player => (
-          <div key={player.userId} 
-               className={`flex items-center gap-2 p-2 rounded-lg mb-2 ${
-                 player.userId === currentUser.uid ? 'bg-indigo-50' : ''
-               }`}>
-            {renderPlayerIcon(player)}
-            <div className="flex-1">
-              <div className="font-medium">{player.username}</div>
-              <div className="text-sm text-gray-500 flex items-center gap-1">
-                <span className={getTierColor(player.tier)}>{player.tier}</span>
-                <span>•</span>
-                <span>{player.score} pts</span>
-                <span>•</span>
-                <span>#{getTierRank(player, topRankings)} in {player.tier}</span>
+          ))}
+        </div>
+  
+        <div className="p-4 border-t border-gray-200">
+          <h3 className="font-semibold mb-2">Your Ranking</h3>
+          
+          {nearbyRankings.map(player => (
+            <div 
+              key={player.userId} 
+              className={`flex items-center gap-2 p-2 rounded-lg mb-2 ${
+                player.userId === currentUser.uid ? 'bg-indigo-50' : ''
+              }`}
+            >
+              {renderPlayerIcon(player)}
+              <div className="flex-1">
+                <div className="font-medium">{player.username}</div>
+                <div className="text-sm text-gray-500 flex items-center gap-1">
+                  <span className={getTierColor(player.tier)}>{player.tier}</span>
+                  <span>•</span>
+                  <span>{player.score.toLocaleString()} pts</span>
+                  <span>•</span>
+                  <span>#{player.rank}</span>
+                </div>
               </div>
+              <div className="text-lg font-bold">#{player.rank}</div>
             </div>
-            <div className="text-lg font-bold">#{player.rank}</div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
-  );
-};
-
-export default RankingSidebar;
+    );
+  };
+  
+  export default RankingSidebar;

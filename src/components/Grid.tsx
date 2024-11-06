@@ -35,13 +35,13 @@ const Grid: React.FC<GridProps> = ({ word, guesses, currentGuess }) => {
     // First pass: mark exact matches
     const exactMatches = new Set();
     for (let i = 0; i < word.length; i++) {
-      if (guess[i].toLowerCase() === word[i]) {
+      if (guess[i].toUpperCase() === word[i].toUpperCase()) {
         exactMatches.add(i);
       }
     }
 
     // If this is an exact match, return green
-    if (letter === word[colIndex]) {
+    if (letter.toUpperCase() === word[colIndex].toUpperCase()) {
       return `${baseClass} bg-green-500 border-green-500 text-white`;
     }
 
@@ -54,17 +54,23 @@ const Grid: React.FC<GridProps> = ({ word, guesses, currentGuess }) => {
     }
 
     // Check if this letter can be yellow
-    if (word.includes(letter) && !exactMatches.has(colIndex)) {
+    if (word.toUpperCase().includes(letter.toUpperCase()) && !exactMatches.has(colIndex)) {
       // Count how many of this letter we've used before this position
       let usedCount = 0;
       for (let i = 0; i < colIndex; i++) {
-        if (guess[i].toLowerCase() === letter && !exactMatches.has(i) && word.includes(letter)) {
+        if (guess[i].toUpperCase() === letter.toUpperCase() && 
+            !exactMatches.has(i) && 
+            word.toUpperCase().includes(letter.toUpperCase())) {
           usedCount++;
         }
       }
 
+      // Count how many of this letter are in the word
+      const letterCount = word.toUpperCase().split('')
+        .filter(l => l === letter.toUpperCase()).length;
+
       // If we haven't used up all instances of this letter, show yellow
-      if (usedCount < (letterCount[letter] || 0)) {
+      if (usedCount < letterCount) {
         return `${baseClass} bg-yellow-500 border-yellow-500 text-white`;
       }
     }

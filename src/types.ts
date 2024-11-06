@@ -22,7 +22,13 @@ export interface SeriesGame {
   winner: string | null;
   completedAt: number;
 }
-
+interface GameStats {
+  invalidWordAttempts: number;
+  reusedAbsentLetters: number;
+  reusedWrongPositions: number;
+  timeToComplete: number;
+  turnsUsed: number;
+}
 export interface Game {
   id: string;
   word: string;
@@ -34,6 +40,7 @@ export interface Game {
   sharedBy?: string;
   sharedWith?: string[];
   playerScore?: number;
+  stats?: GameStats;
   completedAt?: number;
 }
 
