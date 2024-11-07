@@ -121,6 +121,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
     const seriesId = `${auth.currentUser.uid}_${recipientEmail}`.split('_').sort().join('_');
     const seriesRef = doc(db, 'series', seriesId);
     
+    // Create initial game for recipient with same word
     const newGameId = uuidv4();
     const newGame = {
       id: newGameId,
@@ -129,7 +130,8 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
       status: 'playing',
       createdAt: Date.now(),
       seriesId,
-      sharedBy: auth.currentUser.uid
+      sharedBy: auth.currentUser.uid,
+      sharedWith: [recipientEmail]
     };
   
     const newSeries: GameSeries = {
@@ -145,7 +147,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ game, onClose, onShowAuth }) =>
       player2: recipientEmail,
       player1Score: game.status === 'won' ? 1 : 0,
       player2Score: 0,
-      games: [game],
+      games: [{...game, seriesId}], // Add seriesId to the original game
       lastPlayedAt: Date.now(),
       status: 'active'
     };
